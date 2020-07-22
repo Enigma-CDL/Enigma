@@ -7,7 +7,7 @@ from typing import Union, List, Tuple
 
 class qGAN:
 
-    def __init__(self, n_qubits, gen_dev: str = 'cirq.simulator',  disc_dev: str = 'cirq.simulator'):
+    def __init__(self, n_qubits, gen_dev: str = 'qiskit.aer',  disc_dev: str = 'qiskit.aer'):
         self.n_qubits = n_qubits
         self.gen_dev = qml.device(gen_dev, wires=n_qubits)
         self.disc_dev = qml.device(disc_dev, wires=n_qubits)
@@ -23,10 +23,10 @@ class qGAN:
         return cost
 
     @staticmethod
-    def iSWAP(weight: Tuple[float], wires=List[int, int]):
+    def iSWAP(weight: Tuple[float], wires=List[int]):
         c = wires[0]
         t = wires[1]
-        rot = weight[0]
+        rot = weight
         qml.CNOT(wires=[c, t])
         qml.Hadamard(wires=c)
         qml.CNOT(wires=[t, c])
@@ -68,7 +68,7 @@ class qGAN:
         adj_vec = np.reshape(adjacency_matrix, self.n_qubits)
         for i, connection in enumerate(adj_vec):
             if connection:
-                qml.X(wires=i)
+                qml.RX((np.pi), wires=i)
 
     def generator(self, weights: List[Tuple[float]], **kwargs):
         for qb in range(self.n_qubits):
@@ -76,11 +76,11 @@ class qGAN:
 
     def discriminator(self, weights: List[Tuple[float]], **kwargs):
         for qb in range(self.n_qubits):
-            qml.RZ(weights[qb])
-            qml.RX(weights[qb + self.n_qubits])
+            qml.RZ(weights[qb], wires=qb)
+            qml.RX(weights[qb + self.n_qubits], wires=qb)
         qb_list = list(range(self.n_qubits))
         for i, (control, target) in enumerate(zip(qb_list[::-1], qb_list[::-1][1:])):
-            qGAN.iSWAP(weights[2 * self.n_qubits + i], [control, target])
+            qGAN.iSWAP(weights[2 * self.n_qubits + i], wires=[control, target])
 
 
 def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
@@ -118,17 +118,17 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
         return qGAN.tsp_cost(adjacency_matrix, sample_solution)
 
     def train_disc_step(x, gen_weights, disc_weights, optimiser):
-        with tf.GradientTape as tape:
+        with tf.GradientTape() as tape:
             disc_loss = disc_cost(x, gen_weights, disc_weights)
-        grads = tape.gradient(disc_loss, disc_weights)
-        optimiser.apply_gradients(zip(grads, disc_weights))
+        grads = tape.gradient(disc_loss, [disc_weights])
+        optimiser.apply_gradients(zip(grads, [disc_weights]))
         return disc_loss
 
     def train_gen_step(x, gen_weights, disc_weights, optimiser):
         with tf.GradientTape as tape:
             gen_loss = gen_cost(gen_weights, disc_weights)
-        grads = tape.gradient(gen_loss, gen_weights)
-        optimiser.apply_gradients(zip(grads, gen_weights))
+        grads = tape.gradient(gen_loss, [gen_weights])
+        optimiser.apply_gradients(zip(grads, [gen_weights]))
         return gen_loss
 
     def training(x_train):
@@ -139,10 +139,9 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
 
         optimiser = tf.optimizers.SGD(0.02)
         for e in range(15):
-            for batch in x_train:
-                for x in batch:
-                    disc_loss = train_disc_step(x, gen_weights, disc_weights, optimiser)
-                    gen_loss = train_gen_step(x, gen_weights, disc_weights, optimiser)
+            for x in x_train:
+                disc_loss = train_disc_step(x, gen_weights, disc_weights, optimiser)
+                gen_loss = train_gen_step(x, gen_weights, disc_weights, optimiser)
             if not e % 5:
                 print('Gen cost: {}\nDisc cost: {}'.format(gen_loss, disc_loss))
 

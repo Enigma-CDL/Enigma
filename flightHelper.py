@@ -1,12 +1,5 @@
 
 
-HomeBaseWeightOffset =  4
-HomeBases = { "MEM" : 1 }
-
-NotHomeBaseWeight = makeBaseWeight(len(HomeBases)+1) 
-# NotHomeBaseWeight = makeBaseWeight(1) 
-
-
 # Definitions required to support dependant Lagrange settings (see further below)
 # Base Weight calculation
 
@@ -14,6 +7,14 @@ def makeBaseWeight(id):
     # Weight is calculated as: 10 ** ( id + offset +1 )
     #
     return( 10 ** ( id + HomeBaseWeightOffset + 1))
+
+HomeBaseWeightOffset =  4
+HomeBases = { "MEM" : 1 }
+
+NotHomeBaseWeight = makeBaseWeight(len(HomeBases)+1) 
+# NotHomeBaseWeight = makeBaseWeight(1) 
+
+
 
 # Home Base definitions
 #

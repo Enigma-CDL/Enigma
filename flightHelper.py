@@ -1,3 +1,13 @@
+# Definitions required to support dependant Lagrange settings (see further below)
+# Base Weight calculation
+
+
+HomeBaseWeightOffset =  4
+
+def makeBaseWeight(id):
+    # Weight is calculated as: 10 ** ( id + offset +1 )
+    #
+    return( 10 ** ( id + HomeBaseWeightOffset + 1))
 
 
 # Todo: Rename a "start" to a "break". 
@@ -31,21 +41,7 @@ class Node:
             raise Exception("Error on type. Got %s" % (type(obj)))
 
 
-# Definitions required to support dependant Lagrange settings (see further below)
-# Base Weight calculation
 
-def makeBaseWeight(id):
-    # Weight is calculated as: 10 ** ( id + offset +1 )
-    #
-    return( 10 ** ( id + HomeBaseWeightOffset + 1))
-
-
-HomeBaseWeightOffset =  4
-HomeBases = { "MEM" : 1 }
-
-NotHomeBaseWeight = makeBaseWeight(len(HomeBases)+1) 
-
-# NotHomeBaseWeight = makeBaseWeight(1) 
 # Home Base definitions
 #
 # Each valid home base is defined to be assigned its own Weight
@@ -93,7 +89,7 @@ class Segment:
     def getCO(self):
         return self.co
         
-    def __init__(self, id, lab, dep, arr, deptime, arrtime, depday, arrday):
+    def __init__(self, id, lab, dep, arr, deptime, arrtime, depday, arrday, HomeBases):
         self.id = id
         self.lab = lab
         self.dep = dep
@@ -137,6 +133,36 @@ class Segment:
 # n3 = Node(10)    # raises exception as expected
         
 
+# Transition Weight
+#
+#
+# TODO: Rethink the Segment and State classes.
+#       We need to have Segments and States coexist in the edges.
+#       Therefore we need a Vertex class that can be either a Segment or a Start State
+# 
+
+class TransitionWeight:
+    
+    def __init__(self,node1,node2):
+        #
+        # Detect the case we have:
+        #
+        # start-node
+        # node-start
+        # start-start
+        #
+        self.gap = 0
+        if ( node1.isSegment()):   
+            if ( node2.isStart()):     # C -> S
+                self.TransitionBaseWeight = 0 # node1.obj.TransitionBaseWeight - node1.obj.ArrBaseWgt
+            else:                      # C -> C : Standard Weight Transition
+                self.TransitionBaseWeight = ConnectWeight(node1.obj,node2.obj).TransitionBaseWeight
+        else:
+            if ( node2.isSegment()):   # S -> C
+                self.TransitionBaseWeight = 0 # node2.obj.TransitionBaseWeight - node2.obj.ArrBaseWgt
+            else:                      # S -> S
+                self.TransitionBaseWeight = 0
+                
     
     
     
@@ -312,6 +338,79 @@ class TripGen:
         print(Name)
         #print(Q)
 
+        
+    # Objective for minimizing non-flying time
+    # Coefficients calculated for each segment
+    # We use 
+    # (Segment.getUT() ** 2) * coef_lin 
+    # (Segment.getUT() * 2 * coef_quad
+    # We do not apply a Lagrange for objectives
+    #
+
+    def objective_quad_nodes(self, Name, Q, coef_lin,coef_quad,coef_const):
+        N = self.N
+        segments = self.segments
+        count_lin = 0;
+        count_quad = 0;
+        for row in range(N):
+            for u in range(N):
+                undx = row * N + u
+                count_lin+=1
+                Q[(undx,undx)] += (segments[u].obj.getUT() ** 2 * coef_lin) # Base line unallocated time
+                #print("a%d" %(u)," = ", (segments[u].obj.getUT() ** 2 * coef_lin))
+                for v in range(u+1,N):
+                    vndx = row * N + v
+                    # Base line unallocated time 
+                    Q[(undx,vndx)] +=  coef_quad * segments[v].obj.getUT() 
+                    #print("b%d,%d" % (u,v), " = ", coef_quad * segments[v].obj.getUT() )
+                    # Minus pair contribution : - ( 1.UT2 + 2.UT1 ) time gap remains
+                    Q[(undx,vndx)] += -  (segments[u].obj.getUT2()+segments[v].obj.getUT1()) # Removed coef_quad *
+                    #print("b%d,%d" % (u,v), " plus ", -  (segments[u].obj.getUT2()+segments[v].obj.getUT1() ))
+                    count_quad+=1
+        print(Name,1, coef_lin,coef_quad,coef_const)
+        print("Objective Acted on : %d lins, %d quads" % (count_lin, count_quad))
+        #print(Q)
+    # Objective for cancelling the gap when a cycle starts and replacing it with CheckIn time (1 to N+1)
+    # or cancelling  the reaminder of unallocated time when a cycle ends (2 to N )
+
+    def objective_quad_states(self, Name, Q, coef_lin, coef_quad, coef_const, G):
+
+        for node1, node2 in G.edges(data=False):
+            N = self.N
+            segments = self.segments
+            
+            # Process start to segment (new cycle)
+
+            if ( node1.isStart() and node2.isSegment()):
+
+                for row in range(N):
+
+                    sndx = N*N + row               # Start state per row
+                    undx = row * N + node2.id - 1  # Node starting or continuing
+
+                    # Case S to C : node2 is a start of a cycle
+                    # Cancel UT1 and replace it with CheckIn time
+                    print("Node %d start, cancelling %d, adding %d" % ( node2.id, node2.obj.getUT1(), node2.obj.getCI()))
+                    Q[(sndx,undx)] +=  coef_quad * ( node2.obj.getCI() - node2.obj.getUT1())
+
+            # Process segment to start (end of a previous cycle)
+
+            if ( node1.isSegment() and node2.isStart()):
+
+                # We start at row 1 and refer to the previous row
+                for row in range(1,N):
+
+                    undx = (row - 1) * N + node1.id - 1  # Node ending a cycle
+                    sndx = N*N + row                     # Start state per row
+
+                    # Case C to S : node1 is the end of a cycle
+                    # Cancel UT2 and replce it with CheckOut time
+                    print("Node %d end, cancelling %d, adding %d" % ( node1.id, node1.obj.getUT2(), node1.obj.getCO()))
+                    Q[(undx,sndx)] +=  coef_quad * ( node1.obj.getCO() - node1.obj.getUT2())
+
+        print(Name,coef_lin,coef_quad,coef_const)
+        #print(Q)
+        
     def print_trip(self,result):
         variables = result[0]
         energy = result[1]

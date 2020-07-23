@@ -132,15 +132,18 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
         return - fake_true(gen_weight, disc_weight)
 
     def gen_hamming_one(gen_z_meas):
+        to_0_1 = tf.divide(tf.add(gen_z_meas, 1), 2)
         indices = np.arange(n_qubits).reshape((n_cities, n_cities))
         cost = 0
         for i in range(n_cities):
-            weight_c = tf.reduce_sum(tf.gather(gen_z_meas, indices[:, i]))
-            weight_r = tf.reduce_sum(tf.gather(gen_z_meas, indices[i, :]))
-            weight_diag = tf.reduce_sum(tf.gather(gen_z_meas, indices[i, i]))
-            cost += tf.abs(tf.subtract(1, weight_c))
-            cost += tf.abs(tf.subtract(1, weight_r))
+            weight_c = tf.reduce_sum(tf.gather(to_0_1, indices[:, i]))
+            weight_r = tf.reduce_sum(tf.gather(to_0_1, indices[i, :]))
+            weight_diag = tf.reduce_sum(tf.gather(to_0_1, indices[i, i]))
+            cost += 0.25 * tf.abs(tf.subtract(1, weight_c))
+            cost += 0.25 * tf.abs(tf.subtract(1, weight_r))
             cost += weight_diag
+        weight_total = tf.abs(tf.subtract(n_cities - 1, tf.reduce_sum(to_0_1)))
+        cost += weight_total
         return cost
 
     def tsp_cost(sample_solution):
@@ -176,8 +179,7 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
                 gen_loss = train_gen_step(x, gen_weights, disc_weights, optimiser)
             if not e % 5:
                 print('Gen cost: {}\nDisc cost: {}'.format(gen_loss, disc_loss))
-
-                print('Generated sample:\n{}'.format(np.round(generate_sample(gen_weights)).reshape(n_cities,
-                                                                                                   n_cities)))
+                sample = (np.round(generate_sample(gen_weights)).reshape((n_cities, n_cities)) + 1) / 2
+                print('Generated sample:\n{}'.format(np.round(sample)))
 
     training(x_samples)

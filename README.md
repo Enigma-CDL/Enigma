@@ -28,4 +28,6 @@ https://github.com/Enigma-CDL/Enigma/blob/master/qGAN/train_qGAN.ipynb
 ### Gaussian Boson Sampling
 Gaussian Boson Sampling is employed in the continuous mode quantum computer from Xanadu. We use this platform's ability to sample from complex probability distributions to find dense sub-graphs within our total scheduling graph. This allows us to avoid these routes if possible, as the existence of a dense sub graph implies the existence of a congested route / area. This congestion increases operational risk.
 
+https://github.com/Enigma-CDL/Enigma/blob/master/gbsGraphSelector.ipynb
+
 

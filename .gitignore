@@ -4,3 +4,4 @@
 *.pyc
 qGAN/tests/qgan_checkpoints
 qGAN/qgan_checkpoints
+qgan_checkpoints/

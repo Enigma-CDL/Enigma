@@ -73,8 +73,14 @@ class qGAN:
                 qml.RX((np.pi), wires=i)
 
     def generator(self, weights: List[Tuple[float]], **kwargs):
+        qb_list = list(range(self.n_qubits))
+        for i, l in enumerate(range(int(self.n_qubits / 2), 0, -1)):
+            entanglers = qb_list[l:l-i]
+            for i, (control, target) in enumerate(zip(entanglers[::-1], entanglers[::-1][1:])):
+                #qml.CNOT(wires=[control, target])
+                qGAN.iSWAP(weights[self.n_qubits + i], wires=[control, target])
         for qb in range(self.n_qubits):
-            qml.RX(weights[qb], wires=qb)
+            qml.RY(weights[qb], wires=qb)
 
     def discriminator(self, weights: List[Tuple[float]], **kwargs):
         for qb in range(self.n_qubits):
@@ -87,51 +93,64 @@ class qGAN:
 
 
 def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epochs: int = 15, lr: float = 0.02):
+    """
+    Given an adjacency matrix and some sampled solved problems, this function will build the correct size qGAN and
+     train it to attempt to generate novel data.
+    :param adjacency_matrix: The matrix which defines the whole problem, the cost of travelling from node to node
+    :param x_samples: Samples of solved TSP instances, in the form of binary directed adjacency matrices
+    :param epochs: Number of epochs to train for
+    :param lr: Learning rate of the gradient descent optimiser
+    :return:
+    """
     n_cities = adjacency_matrix.shape[0]
     n_qubits = adjacency_matrix.shape[0] ** 2
     qgan = qGAN(n_qubits)
 
     @qml.qnode(qgan.disc_dev, interface='tf')
     def real_disc_circuits(adjaceny_matrix: np.ndarray, disc_weights):
+        """Builds the discrimination circuits when given real data.
+        Probability of the data being real is given by measurement of first qubit"""
         qgan.create_real(adjacency_matrix=adjaceny_matrix)
         qgan.discriminator(disc_weights)
         return qml.expval(qml.PauliZ(0))
 
     @qml.qnode(qgan.gen_dev, interface='tf')
     def gen_disc_circuits(gen_weights, disc_weights):
+        """Builds the discrimination circuit with generated data."""
         qgan.generator(gen_weights)
         qgan.discriminator(disc_weights)
         return qml.expval(qml.PauliZ(0))
 
     @qml.qnode(qgan.gen_dev, interface='tf')
     def generate_sample(gen_weights):
+        """Just samples from the generated circuit"""
         qgan.generator(gen_weights)
         return [qml.expval(qml.PauliZ(x)) for x in range(n_qubits)]
 
-    # @qml.qnode(qgan.gen_dev, interface='tf')
-    # def generator_diag(gen_weights):
-    #     qgan.generator(gen_weights)
-    #     penalty = []
-    #     for i, n in enumerate(range(n_cities)):
-    #         penalty.append(qml.expval(qml.PauliZ((i * n) + i)))
-    #     return penalty
-
     def real_true(sample_solution, disc_weights):
+        """Probability of measuring true when given real data"""
         disc_output = real_disc_circuits(sample_solution, disc_weights)
         return (disc_output + 1) / 2
 
     def fake_true(gen_weights, disc_weights):
+        """Probability of measuring True when given fake data"""
         disc_output = gen_disc_circuits(gen_weights, disc_weights)
         return (disc_output + 1) / 2
 
     def disc_cost(sample_solution, gen_weights, disc_weight):
+        """Cost function for the discriminator. P(M(1)|fake) - P(M(1)|true)"""
         cost = fake_true(gen_weights, disc_weight) - real_true(sample_solution, disc_weight)
         return cost
 
     def gen_cost(gen_weight, disc_weight):
+        """Cost function from the generator - probability of 'tricking' the discriminator"""
         return - fake_true(gen_weight, disc_weight)
 
     def gen_hamming_one(gen_z_meas):
+        """As the adjacency matrix must be of a certain form we can impose these constraints here.
+        They are:  that the diagonal contains only zeros, and that each node is visited only once.
+        We impose these by measuring all qubits in the Z basis and weighting against a Hamming weight =/= 1 for each
+        row and column, and for weighting against all |1> measurements in the diagonal qubts"""
         to_0_1 = tf.divide(tf.add(gen_z_meas, 1), 2)
         indices = np.arange(n_qubits).reshape((n_cities, n_cities))
         cost = 0
@@ -139,11 +158,11 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
             weight_c = tf.reduce_sum(tf.gather(to_0_1, indices[:, i]))
             weight_r = tf.reduce_sum(tf.gather(to_0_1, indices[i, :]))
             weight_diag = tf.reduce_sum(tf.gather(to_0_1, indices[i, i]))
-            cost += 0.25 * tf.abs(tf.subtract(1, weight_c))
-            cost += 0.25 * tf.abs(tf.subtract(1, weight_r))
+            cost += 0.001 * tf.abs(tf.subtract(1, weight_c))
+            cost += 0.001 * tf.abs(tf.subtract(1, weight_r))
             cost += weight_diag
-        weight_total = tf.abs(tf.subtract(n_cities - 1, tf.reduce_sum(to_0_1)))
-        cost += weight_total
+        # weight_total = tf.abs(tf.subtract(n_cities - 1, tf.reduce_sum(to_0_1)))
+        # cost += weight_total
         return cost
 
     def tsp_cost(sample_solution):
@@ -167,7 +186,7 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
         return gen_loss
 
     def training(x_train):
-        init_gen = np.random.normal(size=(n_qubits, ))
+        init_gen = np.random.normal(size=(2* n_qubits, ))
         init_disc = np.random.normal(size=((3 * n_qubits) - 1, ))
         gen_weights = tf.Variable(init_gen)
         disc_weights = tf.Variable(init_disc)

@@ -3,6 +3,7 @@ import pennylane as qml
 import numpy as np
 
 from typing import Union, List, Tuple
+import os
 
 
 class qGAN:
@@ -108,14 +109,6 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
         qgan.generator(gen_weights)
         return [qml.expval(qml.PauliZ(x)) for x in range(n_qubits)]
 
-    # @qml.qnode(qgan.gen_dev, interface='tf')
-    # def generator_diag(gen_weights):
-    #     qgan.generator(gen_weights)
-    #     penalty = []
-    #     for i, n in enumerate(range(n_cities)):
-    #         penalty.append(qml.expval(qml.PauliZ((i * n) + i)))
-    #     return penalty
-
     def real_true(sample_solution, disc_weights):
         disc_output = real_disc_circuits(sample_solution, disc_weights)
         return (disc_output + 1) / 2
@@ -139,8 +132,8 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
             weight_c = tf.reduce_sum(tf.gather(to_0_1, indices[:, i]))
             weight_r = tf.reduce_sum(tf.gather(to_0_1, indices[i, :]))
             weight_diag = tf.reduce_sum(tf.gather(to_0_1, indices[i, i]))
-            cost += 0.25 * tf.abs(tf.subtract(1, weight_c))
-            cost += 0.25 * tf.abs(tf.subtract(1, weight_r))
+            cost += 0.001 * tf.abs(tf.subtract(1, weight_c))
+            cost += 0.001 * tf.abs(tf.subtract(1, weight_r))
             cost += weight_diag
         weight_total = tf.abs(tf.subtract(n_cities - 1, tf.reduce_sum(to_0_1)))
         cost += weight_total
@@ -172,7 +165,11 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
         gen_weights = tf.Variable(init_gen)
         disc_weights = tf.Variable(init_disc)
 
+        checkpoint_dir = './checkpoints/'
+        chkpt_prefix = os.path.join(checkpoint_dir, 'ckpt')
         optimiser = tf.optimizers.SGD(lr)
+        chkpt = tf.train.Checkpoint(optimizer=optimiser, disc_weights=disc_weights,
+                                    gen_weights=gen_weights)
         for e in range(epochs):
             for x in x_train:
                 disc_loss = train_disc_step(x, gen_weights, disc_weights, optimiser)
@@ -181,5 +178,6 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
                 print('Gen cost: {}\nDisc cost: {}'.format(gen_loss, disc_loss))
                 sample = (np.round(generate_sample(gen_weights)).reshape((n_cities, n_cities)) + 1) / 2
                 print('Generated sample:\n{}'.format(np.round(sample)))
+                chkpt.save(file_prefix=chkpt_prefix)
 
     training(x_samples)

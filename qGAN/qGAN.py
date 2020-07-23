@@ -87,6 +87,7 @@ class qGAN:
 
 
 def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epochs: int = 15, lr: float = 0.02):
+    n_cities = adjacency_matrix.shape[0]
     n_qubits = adjacency_matrix.shape[0] ** 2
     qgan = qGAN(n_qubits)
 
@@ -107,6 +108,14 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
         qgan.generator(gen_weights)
         return [qml.expval(qml.PauliZ(x)) for x in range(n_qubits)]
 
+    # @qml.qnode(qgan.gen_dev, interface='tf')
+    # def generator_diag(gen_weights):
+    #     qgan.generator(gen_weights)
+    #     penalty = []
+    #     for i, n in enumerate(range(n_cities)):
+    #         penalty.append(qml.expval(qml.PauliZ((i * n) + i)))
+    #     return penalty
+
     def real_true(sample_solution, disc_weights):
         disc_output = real_disc_circuits(sample_solution, disc_weights)
         return (disc_output + 1) / 2
@@ -122,6 +131,18 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
     def gen_cost(gen_weight, disc_weight):
         return - fake_true(gen_weight, disc_weight)
 
+    def gen_hamming_one(gen_z_meas):
+        indices = np.arange(n_qubits).reshape((n_cities, n_cities))
+        cost = 0
+        for i in range(n_cities):
+            weight_c = tf.reduce_sum(tf.gather(gen_z_meas, indices[:, i]))
+            weight_r = tf.reduce_sum(tf.gather(gen_z_meas, indices[i, :]))
+            weight_diag = tf.reduce_sum(tf.gather(gen_z_meas, indices[i, i]))
+            cost += tf.abs(tf.subtract(1, weight_c))
+            cost += tf.abs(tf.subtract(1, weight_r))
+            cost += weight_diag
+        return cost
+
     def tsp_cost(sample_solution):
         return qGAN.tsp_cost(adjacency_matrix, sample_solution)
 
@@ -135,6 +156,9 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
     def train_gen_step(x, gen_weights, disc_weights, optimiser):
         with tf.GradientTape() as tape:
             gen_loss = gen_cost(gen_weights, disc_weights)
+            gen_z = generate_sample(gen_weights)
+            gen_pen = gen_hamming_one(gen_z)
+            gen_loss += gen_pen
         grads = tape.gradient(gen_loss, [gen_weights])
         optimiser.apply_gradients(zip(grads, [gen_weights]))
         return gen_loss
@@ -153,7 +177,7 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
             if not e % 5:
                 print('Gen cost: {}\nDisc cost: {}'.format(gen_loss, disc_loss))
 
-                print('Generated sample:\n{}'.format(np.round(generate_sample(gen_weights)).reshape(int(np.sqrt(n_qubits)),
-                                                                                                   int(np.sqrt(n_qubits)))))
+                print('Generated sample:\n{}'.format(np.round(generate_sample(gen_weights)).reshape(n_cities,
+                                                                                                   n_cities)))
 
     training(x_samples)

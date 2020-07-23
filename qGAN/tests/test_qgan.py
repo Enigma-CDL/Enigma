@@ -21,7 +21,7 @@ class testqGAN(unittest.TestCase):
     def test_with_one_mat(self):
         adj_mat = np.array([[0, 5], [1, 2]])
         x_samples = [np.array([[0,1], [0,0]]), np.array([[0,1], [0,0]])]
-        create_qGAN(adj_mat, x_samples)
+        create_qGAN(adj_mat, x_samples, 50)
 
 
 if __name__ == '__main__':

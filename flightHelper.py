@@ -1,3 +1,5 @@
+import csv
+
 # Definitions required to support dependant Lagrange settings (see further below)
 # Base Weight calculation
 
@@ -443,4 +445,24 @@ class TripGen:
             max = max - 1
             if ( max <= 0 ): break
 
+# Load flight data files                
+def loadFlts(targetDataSet, Atypes=[], depDay=0, HomeBases=[]):
+    fseg = []
+    firstRow=True
+    flt_id = 0
+    with open(targetDataSet, newline='') as csvfile:
+        fltreader = csv.reader(csvfile, delimiter=',')
+        for row in fltreader:
+            if ( firstRow ):
+                firstRow = False
+            else:
+                #  0    1    2    3      4      5      6      7      8      9      10     11    12    13    14
+                # FID, FN, FDep, FArr, FDepD, FDepT, FArrT, FArrD, UDepD, UDepT, UArrT, UArrD, FFT, FTZD, Atype
+                atype = row[14]
+                if ((len(Atypes)==0) or (atype in Atypes)):
+                    if ((depDay==0) or (depDay==int(row[8]))):
+                        flt_id += 1
+                        fseg.append(Node(Segment(flt_id, row[1], row[2], row[3], int(row[9]), int(row[10]), int(row[8]), int(row[11]),HomeBases)))
+                #print(', '.join(row))
+    return(fseg)
 

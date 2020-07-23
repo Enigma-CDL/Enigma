@@ -19,15 +19,8 @@ class testqGAN(unittest.TestCase):
         np.testing.assert_array_equal(test, truth)
 
     def test_with_one_mat(self):
-        adj_mat = np.array([[0, 5, 1, 0], [7, 0, 1, 2], [1, 4, 0, 3], [1, 2, 1, 0]])
-        x_samples = [np.array([[0,0,0,1],
-                             [1,0,0,0],
-                             [0,0,0,0],
-                             [0,0,1,0]]),
-                          np.array([[0,0,0,1],
-                             [1,0,0,0],
-                             [0,0,0,0],
-                             [0,0,1,0]])]
+        adj_mat = np.array([[0, 5], [1, 2]])
+        x_samples = [np.array([[0,1], [0,0]]), np.array([[0,1], [0,0]])]
         create_qGAN(adj_mat, x_samples)
 
 

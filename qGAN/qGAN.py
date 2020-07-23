@@ -7,7 +7,7 @@ from typing import Union, List, Tuple
 
 class qGAN:
 
-    def __init__(self, n_qubits, gen_dev: str = 'qiskit.aer',  disc_dev: str = 'qiskit.aer'):
+    def __init__(self, n_qubits, gen_dev: str = 'default.qubit.tf',  disc_dev: str = 'default.qubit.tf'):
         self.n_qubits = n_qubits
         self.gen_dev = qml.device(gen_dev, wires=n_qubits)
         self.disc_dev = qml.device(disc_dev, wires=n_qubits)
@@ -80,7 +80,8 @@ class qGAN:
             qml.RX(weights[qb + self.n_qubits], wires=qb)
         qb_list = list(range(self.n_qubits))
         for i, (control, target) in enumerate(zip(qb_list[::-1], qb_list[::-1][1:])):
-            qGAN.iSWAP(weights[2 * self.n_qubits + i], wires=[control, target])
+            qml.CNOT(wires=[control, target])
+            #qGAN.iSWAP(weights[2 * self.n_qubits + i], wires=[control, target])
 
 
 def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
@@ -125,7 +126,7 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
         return disc_loss
 
     def train_gen_step(x, gen_weights, disc_weights, optimiser):
-        with tf.GradientTape as tape:
+        with tf.GradientTape() as tape:
             gen_loss = gen_cost(gen_weights, disc_weights)
         grads = tape.gradient(gen_loss, [gen_weights])
         optimiser.apply_gradients(zip(grads, [gen_weights]))

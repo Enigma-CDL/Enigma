@@ -1,4 +1,11 @@
 import csv
+import networkx as nx
+from collections import defaultdict
+from dimod import BinaryQuadraticModel
+from tabu import TabuSampler        
+from dwave.system import DWaveSampler, EmbeddingComposite, LeapHybridSampler
+import neal
+import numpy as np
 
 # Definitions required to support dependant Lagrange settings (see further below)
 # Base Weight calculation
@@ -466,3 +473,373 @@ def loadFlts(targetDataSet, Atypes=[], depDay=0, HomeBases=[]):
                 #print(', '.join(row))
     return(fseg)
 
+# Master class
+class Anneal:
+
+    # Default Test Case
+    def buildSet1(self):
+        segments=[]
+        segments.append( Node(Segment(1, "X01", "LCA", "ATH", 600, 695, 1, 1,self.HomeBases)))
+        segments.append( Node(Segment(2, "X02", "ATH", "LCA", 755, 845, 1, 1,self.HomeBases)))
+        segments.append( Node(Segment(3, "X03", "LCA", "ATH", 875, 970, 1, 1,self.HomeBases)))
+        segments.append( Node(Segment(4, "X04", "ATH", "LCA", 1035, 1125, 1, 1,self.HomeBases)))
+        return(segments)
+
+    def getN(self):
+        return (self.N)
+
+    def getG(self):
+        return (self.G)
+    
+    def getT(self):
+        return (self.T)
+    
+    def getHomeBases(self):
+        return self.HomeBases
+    
+    def getHomeBaseWeightOffset(self):
+        return self.HomeBaseWeightOffset
+
+    def makeBaseWeight(self,id):
+        # Weight is calculated as: 10 ** ( id + offset +1 )
+        return( 10 ** ( id + HomeBaseWeightOffset + 1))
+
+    # Create the anneal object
+    def __init__(self,dataset="",homebases={},atypes=[],depday=1):
+        self.HomeBases = homebases
+        self.NotHomeBaseWeight = self.makeBaseWeight(len(self.HomeBases)+1) 
+        
+        
+        # Order of magnitude for constraints -> Should be bigger than the base constraints magnitude
+        self.LagrangeA = makeBaseWeight(len(self.HomeBases)+1)    
+        # Order of magnitude for allowed edges
+        self.LagrangeB = self.LagrangeA / 10        
+        # order of magnitude for return to start location (uses base weights)
+        self.LagrangeC = 1                                    
+        
+        # HomeBaseWeightOffset: Critical relative weights for home base management. Only change if you know what you are doing
+        self.HomeBaseWeightOffset =  4 
+        
+        # Load the data
+        
+        #segments = loadFlts("DS1.csv", ["320"], HomeBases )
+        if ( dataset != "" ):
+            self.segments = loadFlts(dataset, Atypes=atypes, depDay = depday, HomeBases=self.HomeBases )
+        else:
+            self.segments = self.buildSet1()
+
+        # Build the graph
+        self.G = self.buildFltGraph(self.segments)
+        
+        # Set N (number of segments)
+        
+        self.N = len(self.segments)
+
+        print ("Minimum Dep", min(node.obj.deptime + ((node.obj.depday-1)) * 1440 for node in self.segments))
+        print ("Maximum Arr", max(node.obj.arrtime + ((node.obj.arrday-1)) * 1440 for node in self.segments))
+
+        # Set T as the range of time fully enclosing all segments, plus buffer
+        self.T = max(node.obj.getUarrtime() for node in self.segments) + (2 * 1440) # We add buffer of 1 day prior and 1 day after
+
+        
+        for s in self.segments:
+            print(s.obj.__dict__)        
+            
+        for seg in self.segments:
+            seg.obj.setT(self.T)
+            seg.obj.setCI(60) # Checkin Time TODO: Parameterize this
+            seg.obj.setCO(30) # Check out time. TODO: Parameterize this
+            print( seg.obj.id, seg.obj.getUT1(), seg.obj.getUT2(), seg.obj.getUT(), seg.obj.ft,seg.obj.getUT()+seg.obj.ft )
+
+        # Create N + 1 row states.
+        # The +1 serves to ensure the last row will be checked for return to base
+
+        state_origin = self.N*self.N;
+        self.states = []
+        for s in range(self.N+1):
+            self.states.append(Node(Start(state_origin+s,"start")))
+            
+            
+        # Add edges dealing with start status bits
+        #
+        # The C to C has been already covered
+        # TODO: Generalize to use 1 method for all
+        #
+
+        # C to S
+        print("C to S")
+        for seg in self.segments:
+            for start in self.states:
+                self.G.add_weighted_edges_from([(seg,start, TransitionWeight(seg,start) )])
+
+        # S to C
+        print("S to C")
+        for start in self.states:
+            for seg in self.segments:
+                if seg.obj.dep in self.HomeBases:
+                    self.G.add_weighted_edges_from([(start,seg, TransitionWeight(start,seg) )])
+
+        # S to S
+        print("S to S")
+        for start in self.states :
+            for start2 in self.states:
+                if ( start != start2 ):
+                    self.G.add_weighted_edges_from([(start,start2, TransitionWeight(start,start2) )])
+
+    # Prepare the QUBO
+    def prepare(self, 
+                cons_1_on = True, 
+                cons_2_on = True, 
+                cons_3_on = True, 
+                cons_4_on = True, 
+                cons_5_on = True, 
+                objective_1_on = True , 
+                objective_2_on = True):
+            
+        self.tg = TripGen(self.N, self.segments )
+
+        # Prepare the QUBO
+
+        self.Q = defaultdict(int)
+
+
+        # Saving some time merging code...
+        Q = self.Q
+        LagrangeA = self.LagrangeA
+        LagrangeB = self.LagrangeB
+        LagrangeC = self.LagrangeC
+        N = self.N
+        G = self.G
+        tg = self.tg
+        
+        # Constraint 1 : The total number of selected nodes must be = N
+        # 
+        #
+
+        if (cons_1_on):
+            c_l = -1
+            c_q =  2 
+            c_c = N**2
+            tg.const_quad_nodes3("Constraint 1: There must be exactly N selected nodes overall", Q, LagrangeA, c_l, c_q, c_c )
+
+        # Constraint 2 : Each node is selected in one and only one row 
+        # 
+        # 
+
+        if (cons_2_on):
+            c_l = -1 
+            c_q = 2 
+            c_c = 1
+            tg.const_quad_rows("Constraint 2: Node selected only in one row", Q, LagrangeA, c_l, c_q, c_c )
+
+
+        # Constraint 3 : There must be at least one start bit set 
+        #               
+        # constraint :
+
+        if (cons_3_on):
+            c_l = -3 
+            c_q = 2 
+            c_c = 0
+            tg.const_quad_states("Constraint 3: At least one start state", Q, LagrangeA, c_l, c_q, c_c )
+
+        # Constraint 4 : Each 2 consecutive row nodes selected must be part of edges 
+        #                Penalize disallowed connections
+        #
+
+        if (cons_4_on):
+            tg.const_edges_connect("Constraint 4: Only allowed edges to connect", Q, LagrangeB, G)
+
+        # Constraint 5 : Must return to starting point
+        #
+        # We add +W at a start and -W at the end
+
+        if (cons_5_on):
+            tg.const_location_start("Constraint 5a: Starting location request return to same location", Q, LagrangeC, G)
+            tg.const_location_return("Constraint 5b: Confirm returning to start lcoation", Q, LagrangeC, G)
+
+        # Objectives
+
+        # Initial Concepts
+        #
+        # T = time range that fully contains the segments of the problem. We can calculate this by taking Max(ArrTime)-Min(DepTime)
+        # FT = Flight Time (duration) of each node
+        # 
+        # We are interested in optimizing the time between nodes
+        #
+        # For this purpose we want to be able to :
+        #
+        # Add the time gap between nodes
+        # When there is a new cycle starting we want to disregard this gap and substitute the Checkin and Checkout times
+        # 
+        # Since we can only consider two Qubits at a time within our Quadratic equations we need a way to 
+        # negate the time gap between two nodes of two separate cycles (since they are not connected)
+        #
+        # To be more specific, we would like to code a conditional penalty as:
+        #
+        #   (1 - Xs) x Gap x( XiXj ) + (Checkin+CheckOut) x XsXiXj
+        #
+        #   Xs is the start variable, 1 = start, 0 = continuation
+        #   Xi, Xj are the selected node pair
+        #
+        # However, we cannot have 3 qubits for the quadratic methodology
+        #
+        # So we introduce a definition of "Undefined Time" (UT), which, added to "non-productive time" will total 
+        # the amount to minimize. "Undefined time" is composed of the time prior to the departure time of a segment plus
+        # the time after the segment. 
+        #
+        # UT = T - FT : So in short the infinite time in which the segment sits in, minus the time it is using.
+        #
+        # To avoid playing with Inifinity, we bind the segments to a fixed time range between -1 day prior to earliest segment 
+        # start up to + 1 day after the latest arrival
+        #
+        # By contributing UT by default for each segment, but deducting it when we have confirmation of the usage of time
+        # between two nodes we then have the ability to individually deal with new cycles, or cycle continuation with only
+        # using 2 variables. However, we will need to seperate contribution calculations:
+        #
+        #   1 for the start of a new cycle: Negate UT prior to the segment and replace it with CI/CO
+        #   2 for continuation nodes, A to B : Negate UT prior to B, Negate UT after A and replace with the time gap between A and B
+        #
+        # UT values (UT1 prior to a segment and UT2 after a segment) can be precalculate for each segment
+        # CI/CO are weights placed on edges between Start nodes and Segment nodes
+        # Gaps are weights placed on edgs between two segments
+        #
+        # 
+
+        if ( objective_1_on ):
+            # Objective 1 - Each node selected contributes
+            # Solved Quad -> c_l = UT**2, c_q = 2 * UT, c_c = 0
+            c_l = 1
+            c_q = 2 
+            c_c = 0
+            tg.objective_quad_nodes("Objective 1: Base line unallocated time", Q, c_l,c_q,c_c)
+
+        if ( objective_2_on ):
+            # Objective 2 - Each S-C combination cancels time gap by 
+            # Solved Quad -> c_l = UT**2, c_q = 2 * UT, c_c = 0
+            c_l = 1
+            c_q = 2 
+            c_c = 0
+            tg.objective_quad_states("Objective 2: Implement CI, gap and CO cancelling unallocated time", Q, c_l,c_q,c_c,G)
+
+
+        #print(Q)
+        return (True)
+      
+            
+    # Solver
+    def solve(self, 
+              useQPU=False, 
+              useNeal=False, 
+              useHyb=True,
+              time_limit = 10,
+              num_reads = 100,
+              chain_strength = 10000):
+        
+        Q = self.Q
+        BQM_offset = 0 # TODO: Use the accumulated quadratic constants from the constraints
+
+        bqm = BinaryQuadraticModel.from_qubo(Q, offset=BQM_offset)
+
+        self.sampleset = None
+        
+        # Call the requested solver
+        
+        if ( useQPU ):
+            sampler = EmbeddingComposite(DWaveSampler(solver={'qpu': True}))
+            sampleset = sampler.sample_qubo(Q, num_reads=num_reads,chain_strength = chain_strength)
+        elif ( useHyb ): 
+            sampler = LeapHybridSampler()
+            sampleset = sampler.sample(bqm, time_limit = time_limit)
+        elif ( useNeal ): 
+            sampler = neal.SimulatedAnnealingSampler()
+            sampleset = sampler.sample(bqm, num_reads = num_reads)
+        else:
+            sampler = TabuSampler()
+            sampleset = sampler.sample(bqm, num_reads = num_reads)
+
+        self.sampleset = sampleset
+        
+        count = 0
+        for res in self.sampleset.data(): count += 1
+        
+        return (count)
+
+    def print_all(self,max=3):
+        self.tg.print_all(self.sampleset,max)
+    
+    #def getRevMatrix(self,M):
+        
+    
+    def getAdjMatrices(self):
+        
+        # Calculate Each adjacency Matrix for each result
+
+        allMatrices = []
+        N = self.N
+        
+        
+        for result in self.sampleset.data():
+
+            AdjMatrix = np.zeros((N,N))
+
+            # For each pair of connecting nodes record the time gap between them
+            # This excludes "apparently" consecutive nodes that are separated by a "Start".
+
+            variables = result[0]
+            sndx = N*N
+
+            # For each row until N-1 
+            # Assign the gap between node 1 and the following node 2 to the AdjMatrix if they are connected
+
+            for r in range(N-1):
+                r2 = r+1
+
+                # Get the start state of the next node
+                state = 0
+                if ( sndx+r2 < len(variables)):
+                    state = variables[sndx+r2]
+
+                # If it is not a start node, then node1 and node2 connect
+
+                #if ( state == 0 ):
+                for node1 in range(N):
+                    n1 = r * N + node1
+                    if ( variables[n1] == 1):
+                        for node2 in range(N):
+                            n2 = r2 * N + node2
+                            if (( variables[n2] == 1)and(node1 != node2)):
+                                AdjMatrix[node1,node2] = 1 # gap(segments[node1].obj,segments[node2].obj)
+
+
+            allMatrices.append(AdjMatrix)
+            
+        return(allMatrices)
+
+    
+    # Build graph from segments for viewing
+    def buildViewGraph(self,segments):
+        G = nx.DiGraph()
+        for n1 in segments:
+            for n2 in segments:
+                if ( n1.id != n2.id ):
+                    # Prevent connections when gaps are 0 or negative
+                    cw = ConnectWeight(n1.obj,n2.obj)
+                    if ( cw.gap > 0 ):
+                        G.add_weighted_edges_from([(n1.id,n2.id, cw.gap  )])
+        return G
+
+    # build graph from segments for processing
+    def buildFltGraph(self,segments):
+        G = nx.DiGraph()
+        for n1 in segments:
+            for n2 in segments:
+                if ( n1.id != n2.id ):
+                    # Prevent connections when gaps are 0 or negative
+                    cw = ConnectWeight(n1.obj,n2.obj)
+                    if ( cw.gap > 0 ):
+                        G.add_weighted_edges_from([(n1,n2, cw  )])
+        return G    
+  
+    
+    

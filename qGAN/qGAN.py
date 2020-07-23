@@ -82,11 +82,11 @@ class qGAN:
             qml.RX(weights[qb + self.n_qubits], wires=qb)
         qb_list = list(range(self.n_qubits))
         for i, (control, target) in enumerate(zip(qb_list[::-1], qb_list[::-1][1:])):
-            qml.CNOT(wires=[control, target])
-            #qGAN.iSWAP(weights[2 * self.n_qubits + i], wires=[control, target])
+            #qml.CNOT(wires=[control, target])
+            qGAN.iSWAP(weights[2 * self.n_qubits + i], wires=[control, target])
 
 
-def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
+def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epochs: int = 15, lr: float = 0.02):
     n_qubits = adjacency_matrix.shape[0] ** 2
     qgan = qGAN(n_qubits)
 
@@ -145,8 +145,8 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
         gen_weights = tf.Variable(init_gen)
         disc_weights = tf.Variable(init_disc)
 
-        optimiser = tf.optimizers.SGD(0.02)
-        for e in range(15):
+        optimiser = tf.optimizers.SGD(lr)
+        for e in range(epochs):
             for x in x_train:
                 disc_loss = train_disc_step(x, gen_weights, disc_weights, optimiser)
                 gen_loss = train_gen_step(x, gen_weights, disc_weights, optimiser)

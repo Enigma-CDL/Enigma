@@ -1,6 +1,7 @@
 import tensorflow as tf
 import pennylane as qml
 import numpy as np
+import os
 
 from typing import Union, List, Tuple
 
@@ -191,7 +192,11 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
         gen_weights = tf.Variable(init_gen)
         disc_weights = tf.Variable(init_disc)
 
+        checkpoint_dir = './checkpoints/'
+        chkpt_prefix = os.path.join(checkpoint_dir, 'ckpt')
         optimiser = tf.optimizers.SGD(lr)
+        chkpt = tf.train.Checkpoint(optimizer=optimiser, disc_weights=disc_weights,
+                                    gen_weights=gen_weights)
         for e in range(epochs):
             for x in x_train:
                 disc_loss = train_disc_step(x, gen_weights, disc_weights, optimiser)
@@ -200,5 +205,6 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epoch
                 print('Gen cost: {}\nDisc cost: {}'.format(gen_loss, disc_loss))
                 sample = (np.round(generate_sample(gen_weights)).reshape((n_cities, n_cities)) + 1) / 2
                 print('Generated sample:\n{}'.format(np.round(sample)))
+                chkpt.save(file_prefix=chkpt_prefix)
 
     training(x_samples)

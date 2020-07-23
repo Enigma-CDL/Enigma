@@ -2,7 +2,6 @@ import tensorflow as tf
 import pennylane as qml
 import numpy as np
 import os
-from recirq.optimize.mgd import model_gradient_descent
 
 from typing import Union, List, Tuple
 

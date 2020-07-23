@@ -14,7 +14,9 @@ class qGAN:
 
     @staticmethod
     def tsp_cost(adjacency_matrix: np.ndarray, solution_vector: np.ndarray):
-        order = np.where(solution_vector == 1)[1]
+        order = np.where(solution_vector == 1)
+        norm = np.sum(adjacency_matrix)
+        adjacency_matrix = adjacency_matrix / norm
         last = order[0]
         cost = 0
         for next_node in order:
@@ -100,6 +102,11 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
         qgan.discriminator(disc_weights)
         return qml.expval(qml.PauliZ(0))
 
+    @qml.qnode(qgan.gen_dev, interface='tf')
+    def generate_sample(gen_weights):
+        qgan.generator(gen_weights)
+        return [qml.expval(qml.PauliZ(x)) for x in range(n_qubits)]
+
     def real_true(sample_solution, disc_weights):
         disc_output = real_disc_circuits(sample_solution, disc_weights)
         return (disc_output + 1) / 2
@@ -145,5 +152,8 @@ def create_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray]):
                 gen_loss = train_gen_step(x, gen_weights, disc_weights, optimiser)
             if not e % 5:
                 print('Gen cost: {}\nDisc cost: {}'.format(gen_loss, disc_loss))
+
+                print('Generated sample:\n{}'.format(np.round(generate_sample(gen_weights)).reshape(int(np.sqrt(n_qubits)),
+                                                                                                   int(np.sqrt(n_qubits)))))
 
     training(x_samples)

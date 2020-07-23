@@ -831,7 +831,7 @@ class Anneal:
                                     AdjMatrix[node1,node2] = 1 # gap(segments[node1].obj,segments[node2].obj)
 
 
-            allMatrices.append(AdjMatrix)
+            allMatrices.append([result,AdjMatrix])
             
         return(allMatrices)
 
@@ -862,5 +862,30 @@ class Anneal:
                         G.add_weighted_edges_from([(n1,n2, cw  )])
         return G    
   
-    
+    def getCost(self,M,res):
+        
+        # Cost = T * (CI * CO) + FT + Gaps
+        
+        ft = 0
+        for s in self.segments:
+            ft += s.obj.ft
+        
+        T = 0
+        first = True
+        for st in range(self.N):
+            sndx = self.N * self.N + st
+            if ( first or (res[0][sndx] == 1)): 
+                T = T + 1
+            first = False
+            
+        CI = 60
+        CO = 30
+        
+  
+        cost = M.sum() + T * (CI+CO) + ft
+                
+        #print(T, CI, CO, ft, M.sum(), cost)
+        
+        return(cost)
+        
     

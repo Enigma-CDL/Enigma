@@ -780,7 +780,14 @@ class Anneal:
                 R[s1.id-1,s2.id-1] = gap(s1.obj,s2.obj) #cw.gap;
         return(R)                
     
-    def getAdjMatrices(self):
+    def getAdjMatricesB(self):
+        return( self.getAdjMatrices(weights=False))
+    
+    def getAdjMatricesW(self):
+        return( self.getAdjMatrices(weights=True))
+
+    # Obtain the Adjacency Matrix from the results sampled producing either weights (True) or Binary (False)
+    def getAdjMatrices(self, weights=False):
         
         # Calculate Each adjacency Matrix for each result
 
@@ -818,7 +825,10 @@ class Anneal:
                         for node2 in range(N):
                             n2 = r2 * N + node2
                             if (( variables[n2] == 1)and(node1 != node2)):
-                                AdjMatrix[node1,node2] = 1 # gap(segments[node1].obj,segments[node2].obj)
+                                if ( weights == True):
+                                    AdjMatrix[node1,node2] = gap(self.segments[node1].obj,self.segments[node2].obj)
+                                else:
+                                    AdjMatrix[node1,node2] = 1 # gap(segments[node1].obj,segments[node2].obj)
 
 
             allMatrices.append(AdjMatrix)

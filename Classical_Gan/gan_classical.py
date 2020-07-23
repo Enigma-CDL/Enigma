@@ -23,7 +23,7 @@ class GAN:
         for i in range(number_preds):
             noise = tf.random.normal([1, 100])
             cat = self.enigma(noise, training=False)
-            kitty = tf.reshape(cat, [4,4])
+            kitty = tf.reshape(cat, [24,24])
             fluff = tf.math.greater(kitty, 0.5)
             puff = tf.cast(fluff, tf.int32)
             output.append(puff)

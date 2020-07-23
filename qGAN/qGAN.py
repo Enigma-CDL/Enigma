@@ -141,8 +141,8 @@ def train_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epochs
     :param lr: Learning rate of the gradient descent optimiser
     :return:
     """
-    n_cities = adjacency_matrix.shape[0]
-    n_qubits = adjacency_matrix.shape[0] ** 2
+    n_cities = adjacency_matrix.shape[1]
+    n_qubits = adjacency_matrix.shape[1] ** 2
     qgan = qGAN(n_qubits, gen_dev, disc_dev)
     observable = qml.PauliZ if qgan.qubit else qml.NumberOperator
 
@@ -165,7 +165,7 @@ def train_qGAN(adjacency_matrix: np.ndarray, x_samples: List[np.ndarray], epochs
     def generate_sample(gen_weights):
         """Just samples from the generated circuit"""
         qgan.generator(gen_weights)
-        return [qml.sample(observable(x)) for x in range(n_qubits)]
+        return [qml.expval(observable(x)) for x in range(n_qubits)]
 
     def real_true(sample_solution, disc_weights):
         """Probability of measuring true when given real data"""

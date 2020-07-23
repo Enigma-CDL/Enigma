@@ -399,7 +399,7 @@ class TripGen:
 
                     # Case S to C : node2 is a start of a cycle
                     # Cancel UT1 and replace it with CheckIn time
-                    print("Node %d start, cancelling %d, adding %d" % ( node2.id, node2.obj.getUT1(), node2.obj.getCI()))
+                    #print("Node %d start, cancelling %d, adding %d" % ( node2.id, node2.obj.getUT1(), node2.obj.getCI()))
                     Q[(sndx,undx)] +=  coef_quad * ( node2.obj.getCI() - node2.obj.getUT1())
 
             # Process segment to start (end of a previous cycle)
@@ -414,7 +414,7 @@ class TripGen:
 
                     # Case C to S : node1 is the end of a cycle
                     # Cancel UT2 and replce it with CheckOut time
-                    print("Node %d end, cancelling %d, adding %d" % ( node1.id, node1.obj.getUT2(), node1.obj.getCO()))
+                    #print("Node %d end, cancelling %d, adding %d" % ( node1.id, node1.obj.getUT2(), node1.obj.getCO()))
                     Q[(undx,sndx)] +=  coef_quad * ( node1.obj.getCO() - node1.obj.getUT2())
 
         print(Name,coef_lin,coef_quad,coef_const)
@@ -529,7 +529,7 @@ class Anneal:
             self.segments = self.buildSet1()
 
         # Build the graph
-        self.G = self.buildFltGraph(self.segments)
+        self.G = self.buildFltGraph()
         
         # Set N (number of segments)
         
@@ -542,14 +542,14 @@ class Anneal:
         self.T = max(node.obj.getUarrtime() for node in self.segments) + (2 * 1440) # We add buffer of 1 day prior and 1 day after
 
         
-        for s in self.segments:
-            print(s.obj.__dict__)        
+        #for s in self.segments:
+        #    print(s.obj.__dict__)        
             
         for seg in self.segments:
             seg.obj.setT(self.T)
             seg.obj.setCI(60) # Checkin Time TODO: Parameterize this
             seg.obj.setCO(30) # Check out time. TODO: Parameterize this
-            print( seg.obj.id, seg.obj.getUT1(), seg.obj.getUT2(), seg.obj.getUT(), seg.obj.ft,seg.obj.getUT()+seg.obj.ft )
+            #print( seg.obj.id, seg.obj.getUT1(), seg.obj.getUT2(), seg.obj.getUT(), seg.obj.ft,seg.obj.getUT()+seg.obj.ft )
 
         # Create N + 1 row states.
         # The +1 serves to ensure the last row will be checked for return to base
@@ -567,20 +567,20 @@ class Anneal:
         #
 
         # C to S
-        print("C to S")
+        #print("C to S")
         for seg in self.segments:
             for start in self.states:
                 self.G.add_weighted_edges_from([(seg,start, TransitionWeight(seg,start) )])
 
         # S to C
-        print("S to C")
+        #print("S to C")
         for start in self.states:
             for seg in self.segments:
                 if seg.obj.dep in self.HomeBases:
                     self.G.add_weighted_edges_from([(start,seg, TransitionWeight(start,seg) )])
 
         # S to S
-        print("S to S")
+        #print("S to S")
         for start in self.states :
             for start2 in self.states:
                 if ( start != start2 ):
@@ -746,15 +746,19 @@ class Anneal:
         # Call the requested solver
         
         if ( useQPU ):
+            print("Solving using the DWaveSampler on the QPU...")
             sampler = EmbeddingComposite(DWaveSampler(solver={'qpu': True}))
             sampleset = sampler.sample_qubo(Q, num_reads=num_reads,chain_strength = chain_strength)
         elif ( useHyb ): 
+            print("Solving using the LeapHybridSolver...")
             sampler = LeapHybridSampler()
             sampleset = sampler.sample(bqm, time_limit = time_limit)
         elif ( useNeal ): 
+            print("Solving using the SimulatedAnnealing...")
             sampler = neal.SimulatedAnnealingSampler()
             sampleset = sampler.sample(bqm, num_reads = num_reads)
         else:
+            print("Solving using the TabuSampler...")
             sampler = TabuSampler()
             sampleset = sampler.sample(bqm, num_reads = num_reads)
 
@@ -768,8 +772,13 @@ class Anneal:
     def print_all(self,max=3):
         self.tg.print_all(self.sampleset,max)
     
-    #def getRevMatrix(self,M):
+    def getRevMatrix(self,M):
+        R = np.zeros((self.N,self.N))
         
+        for s1,s2,cw in self.G.edges(data=True):
+            if ( s1.isSegment() and s2.isSegment() and (M[s1.id-1,s2.id-1] == 1) ):
+                R[s1.id-1,s2.id-1] = gap(s1.obj,s2.obj) #cw.gap;
+        return(R)                
     
     def getAdjMatrices(self):
         
@@ -818,7 +827,8 @@ class Anneal:
 
     
     # Build graph from segments for viewing
-    def buildViewGraph(self,segments):
+    def buildViewGraph(self):
+        segments = self.segments
         G = nx.DiGraph()
         for n1 in segments:
             for n2 in segments:
@@ -830,7 +840,8 @@ class Anneal:
         return G
 
     # build graph from segments for processing
-    def buildFltGraph(self,segments):
+    def buildFltGraph(self):
+        segments = self.segments
         G = nx.DiGraph()
         for n1 in segments:
             for n2 in segments:

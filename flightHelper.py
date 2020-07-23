@@ -1,5 +1,36 @@
 
 
+# Todo: Rename a "start" to a "break". 
+
+class Start:
+
+    def __init__(self, id, lab):
+        self.id = id
+        self.lab = lab
+
+class Node:
+
+    def isStart(self):
+        return isinstance(self.obj,Start)
+    
+    def isSegment(self):
+        return isinstance(self.obj,Segment)
+    
+    def __init__(self, obj ):
+        if ( isinstance(obj,Segment)):
+            self.id = obj.id
+            self.lab = obj.lab
+            self.obj = obj
+            #print("Node %d is %s" % (self.id, self.lab))
+        elif ( isinstance(obj,Start)):
+            self.id = obj.id
+            self.lab = obj.lab
+            self.obj = obj
+            #print("We have Start State %d" % (self.id))
+        else:
+            raise Exception("Error on type. Got %s" % (type(obj)))
+
+
 # Definitions required to support dependant Lagrange settings (see further below)
 # Base Weight calculation
 
@@ -8,14 +39,13 @@ def makeBaseWeight(id):
     #
     return( 10 ** ( id + HomeBaseWeightOffset + 1))
 
+
 HomeBaseWeightOffset =  4
 HomeBases = { "MEM" : 1 }
 
 NotHomeBaseWeight = makeBaseWeight(len(HomeBases)+1) 
+
 # NotHomeBaseWeight = makeBaseWeight(1) 
-
-
-
 # Home Base definitions
 #
 # Each valid home base is defined to be assigned its own Weight
@@ -98,35 +128,6 @@ class Segment:
 
 # Create Start objects for adding as special edges
 
-# Todo: Rename a "start" to a "break". 
-
-class Start:
-
-    def __init__(self, id, lab):
-        self.id = id
-        self.lab = lab
-
-class Node:
-
-    def isStart(self):
-        return isinstance(self.obj,Start)
-    
-    def isSegment(self):
-        return isinstance(self.obj,Segment)
-    
-    def __init__(self, obj ):
-        if ( isinstance(obj,Segment)):
-            self.id = obj.id
-            self.lab = obj.lab
-            self.obj = obj
-            #print("Node %d is %s" % (self.id, self.lab))
-        elif ( isinstance(obj,Start)):
-            self.id = obj.id
-            self.lab = obj.lab
-            self.obj = obj
-            #print("We have Start State %d" % (self.id))
-        else:
-            raise Exception("Error on type. Got %s" % (type(obj)))
 
 # print("Testing Node class")
 # n1 = Node(Segment(1, "101", "LCA", "ATH", 600, 695, 1, 1))
@@ -184,3 +185,163 @@ class ConnectWeight:
         
 def gap(seg1,seg2):
 	return( seg2.depday * 1440 + seg2.deptime - (seg1.depday * 1440 + seg1.deptime + seg1.ft ))
+
+
+# Constraints as functions so we can easily turn them on or off
+
+class TripGen:
+    
+    def __init__(self,N,segments):
+        self.N = N
+        self.segments = segments
+        
+    # New test for constraint1- Works much better. Note how the coef are updated: += 
+    def const_quad_nodes3(self,Name, Q, LG, coef_lin,coef_quad,coef_const):
+        N = self.N
+        count_lin = 0;
+        count_quad = 0;
+        for row in range(N):
+            for u in range(N):
+                indx = row * N + u
+                Q[(indx,indx)] += (LG * coef_lin)
+                for v in range(u+1,N):
+                    jndx = row * N + v
+                    Q[(indx,jndx)] +=  coef_quad * LG
+                    count_quad+=1
+        print(Name,LG, coef_lin,coef_quad,coef_const)
+        print("Acted on : %d lins, %d quads" % (count_lin, count_quad))
+        #print(Q)
+
+
+     # Revised and Corrected
+    # Coefficient handling corrected
+    def const_quad_rows(self,Name, Q, LG, coef_lin,coef_quad,coef_const):
+        N = self.N
+        count_lin = 0;
+        count_quad = 0;
+        for row in range(N):
+            origin = row * N
+            for node in range(N):
+                indx = origin + node
+                Q[(indx,indx)] += (LG * coef_lin)
+                count_lin+=1
+                for row2 in range( row + 1, N):
+                    jndx = row2 * N + node
+                    Q[(indx,jndx)] +=  coef_quad * LG
+                    count_quad+=1
+        print(Name,LG, coef_lin,coef_quad,coef_const)
+        print("Acted on : %d lins, %d quads" % (count_lin, count_quad))
+    #print(Q)
+
+    # Change: Dec Lin, Inc Quad for constraints
+    def const_quad_states(self,Name, Q, LG, coef_lin, coef_quad, coef_const):
+        N = self.N
+        for row in range(N):
+            rndx = N**2 + row  # N bits after the main nodes matrix
+            Q[(rndx,rndx)] += (LG * coef_lin)
+            for j in range(row+1, N):
+                jndx = N**2 + j
+                Q[(rndx,jndx)] +=  coef_quad * LG
+        print(Name,LG, coef_lin,coef_quad,coef_const)
+        #print(Q)
+
+    # WIP: Reworking the loop. Need to consider consecutive rows.
+
+    def const_edges_connect(self,Name, Q, LG, G):
+        N = self.N
+        segments = self.segments
+        for row in range(N-1):
+            row2 = row + 1
+            for node in range(N):
+                for node2 in range(N):
+                    indx = row * N + node
+                    jndx = row2 * N + node2
+
+                    if not G.has_edge(segments[node],segments[node2]):
+
+                        # Penalize the lack of edge
+                        #print("Penalizing %d to %d, connection not allowed" % (node,node2))
+                        Q[(indx,jndx)] += LG
+
+        print(Name)
+        #print(Q)
+
+    # ================================================================
+    # Return to base : penalizing on start and depenalizing on return
+    # 
+    # const_location_start : Will add the base weight of the airport
+    # const_location_return: Will subtract base weight of the airport
+    # 
+    # a Net Zero means we have a cycle returning to the start airport
+    #
+    # ================================================================
+    #    for n1,n2,data in G.edges(data=True):
+
+    def const_location_start(self,Name, Q, LG, G):
+        N = self.N
+        segments = self.segments
+
+        # for edges connecting a start to a segment install the base weight
+        for s1,v1,cw in G.edges(data=True):
+
+            for r in range(N):
+                s = N*N + r
+                for v in range(N):
+                    sndx = s
+                    vndx = r * N + v
+                    if ( s1.id == s ) and (v1.id == segments[v].id):
+                        Q[(sndx,vndx)] -= LG * segments[v].obj.DepBaseWgt
+        print(Name)
+        #print(Q)
+
+    def const_location_return(self,Name, Q, LG, G):
+        N = self.N
+        segments = self.segments
+
+        # for edges connecting a segment to a start retract the base weight
+        for v1,s1,cw in G.edges(data=True):
+
+            for r in range(2,N):
+                s = N*N + r
+                for v in range(N):
+                    sndx = r
+                    vndx = (r-1) * N + v  # Previous row node
+                    if ( s1.id == s ) and (v1.id == segments[v].id):
+                        Q[(vndx,sndx)] += LG * segments[v].obj.ArrBaseWgt
+
+        print(Name)
+        #print(Q)
+
+    def print_trip(self,result):
+        variables = result[0]
+        energy = result[1]
+        N = self.N
+        segments = self.segments
+        
+        print("Energy %f" % (energy))
+        sndx = N*N
+        for row in range(N):
+            origin = row * N
+            state = 0
+        
+            if ( sndx+row < len(variables)):
+                state = variables[sndx+row]
+
+            for node in range(N):
+                n = origin + node
+
+                if ( variables[n] == 1):
+                    if ( state == 1):
+                        print("Start")
+                    print(row, segments[node].obj.id, segments[node].obj.lab, segments[node].obj.dep, segments[node].obj.arr)
+        print("---------------")
+
+    # print(len(sampleset._record), sampleset._record[0])
+
+    def print_all(self, sampleset, max = 3):
+        for res in sampleset.data():
+            self.print_trip(res)
+            max = max - 1
+            if ( max <= 0 ): break
+
+

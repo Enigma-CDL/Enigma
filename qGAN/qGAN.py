@@ -15,8 +15,8 @@ class qGAN:
             self.gen_dev = qml.device(gen_dev, wires=n_qubits)
             self.disc_dev = qml.device(disc_dev, wires=n_qubits)
         except TypeError:
-            self.gen_dev = qml.device(gen_dev, wires=n_qubits, cutoff_dim=n_qubits)
-            self.disc_dev = qml.device(disc_dev, wires=n_qubits, cutoff_dim=n_qubits)
+            self.gen_dev = qml.device(gen_dev, wires=n_qubits, cutoff_dim=2)
+            self.disc_dev = qml.device(disc_dev, wires=n_qubits, cutoff_dim=2)
         if 'GaussianState' not in self.gen_dev.operations:
             self.create_real, self.generator, self.discriminator = self.create_real_qubit, self.generator_qubit, \
                                                                self.discriminator_qubit

@@ -10,8 +10,8 @@ One challenge is the fact many flights may be close to overlapping in schedule a
 What can we do to make our planning better? 
 
 ### AirLine DataSets
-Data sets from the Air line industry with respect to flight routes
-![cap5](../figures/)
+Datasets from the Airline industry were used that contained flight route data.
+
 ### Trip Annealer 
 Encodes graph Traveling Sales Problem inot QUBO on Dwave System
 
